@@ -41,6 +41,8 @@ const STAGES=[
 const getStage=p=>{let s=STAGES[0];for(const x of STAGES){if(p>=x.min)s=x;}return s;};
 const fmt=sec=>{if(sec<=0)return"00:00";const m=Math.floor(sec/60),s=sec%60;return`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;};
 const ni=v=>Math.max(0,parseInt(v)||0);
+const fmtSP=ts=>new Date(ts).toLocaleTimeString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit"});
+const fmtSPFull=ts=>new Date(ts).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
 const DEF={custoSemente:50,custoVaso:25,custoRegador:20,custoFert:35,intervaloMin:90,crescPct:5,crescMin:9,qtdAgua:2,qtdFert:2};
 
 function App(){
@@ -247,6 +249,7 @@ function App(){
               <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#4ade8033",marginTop:3}}>
                 {[0,25,50,75,100].map(v=><span key={v}>{v}%</span>)}
               </div>
+              {!isReady&&<div style={{marginTop:6,fontSize:10,color:"#fbbf2088",textAlign:"right"}}>🌾 Colher às <span style={{...OR,color:"#fbbf24",fontWeight:700,fontSize:12}}>{fmtSP(plant.plantedAt+growMin*60*1000)}</span></div>}
             </div>
 
             <div className={needsCare?"crit":urgent?"urg":""} style={{background:needsCare?"rgba(239,68,68,.08)":"rgba(0,0,0,.35)",border:"1px solid "+(needsCare?"#ef4444":urgent?"#fbbf24":"#4ade8022"),borderRadius:12,padding:"14px 18px",marginBottom:14}}>
@@ -257,6 +260,7 @@ function App(){
                     {needsCare?"CUIDAR AGORA!":fmt(cl)}
                   </div>
                   <div style={{fontSize:10,color:"#4ade8044",marginTop:3}}>A cada {sn.intervaloMin}min · {plant.careCount}/{sn.qtdAgua} ciclos</div>
+                  {!needsCare&&<div style={{fontSize:10,color:"#fbbf2066",marginTop:2}}>🕐 Cuidar às <span style={{...OR,color:"#fbbf24",fontWeight:700,fontSize:11}}>{fmtSP(plant.nextCare)}</span></div>}
                 </div>
                 <button onClick={()=>doCare(plant.id)} style={{background:needsCare?"linear-gradient(135deg,#1d4ed8,#3b82f6)":"rgba(74,222,128,.08)",border:"1px solid "+(needsCare?"#3b82f6":"#4ade8044"),color:needsCare?"#fff":"#4ade80",minWidth:148,fontSize:11,fontWeight:700,letterSpacing:1,borderRadius:6,cursor:"pointer",...S,padding:"8px 0"}}>✓ JÁ CUIDEI</button>
               </div>
@@ -508,6 +512,21 @@ function App(){
                   ))}
                 </div>
                 <div style={{fontSize:9,color:"#4ade8044"}}>⏱ {growMin}min · rega a cada {cfg.intervaloMin}min</div>
+                <div style={{marginTop:10,borderTop:"1px solid #4ade8022",paddingTop:10,display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{fontSize:9,letterSpacing:2,color:"#4ade8055",marginBottom:2}}>📅 HORÁRIOS PREVISTOS (SP)</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(251,191,36,.06)",borderRadius:6,border:"1px solid #fbbf2422"}}>
+                    <span style={{fontSize:10,color:"#fbbf2088"}}>💧🌿 1ª rega + adubo</span>
+                    <span style={{...OR,fontSize:13,fontWeight:900,color:"#fbbf24"}}>agora (ao plantar)</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(251,191,36,.06)",borderRadius:6,border:"1px solid #fbbf2422"}}>
+                    <span style={{fontSize:10,color:"#fbbf2088"}}>💧🌿 2ª rega + adubo</span>
+                    <span style={{...OR,fontSize:13,fontWeight:900,color:"#fbbf24"}}>{fmtSP(Date.now()+cfg.intervaloMin*60*1000)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(74,222,128,.06)",borderRadius:6,border:"1px solid #4ade8033"}}>
+                    <span style={{fontSize:10,color:"#4ade8088"}}>🌾 Colheita</span>
+                    <span style={{...OR,fontSize:14,fontWeight:900,color:"#4ade80"}}>{fmtSP(Date.now()+growMin*60*1000)}</span>
+                  </div>
+                </div>
               </div>
             );
           })()}
