@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Farm Companion FiveM</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060e06;overflow-x:hidden}
+@keyframes gY{0%,100%{box-shadow:0 0 8px #fbbf2466}50%{box-shadow:0 0 24px #fbbf24cc}}
+@keyframes gR{0%,100%{box-shadow:0 0 8px #ef444466;border-color:#ef4444!important}50%{box-shadow:0 0 28px #ef4444cc}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.15}}
+@keyframes toast{0%{opacity:0;transform:translateY(16px)}12%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
+.urg{animation:gY 1.2s infinite}
+.crit{animation:gR 0.8s infinite}
+.rdy{animation:gY 1.5s infinite}
+.card{animation:fadeUp 0.35s ease}
+input:focus{outline:2px solid #4ade80!important}
+input[type=number]::-webkit-inner-spin-button{opacity:.4}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:#0a140a}
+::-webkit-scrollbar-thumb{background:#4ade8044;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const STAGES=[
+  {min:0,  label:"Semente",  emoji:"🌱"},
+  {min:20, label:"Brotando", emoji:"🌿"},
+  {min:40, label:"Crescendo",emoji:"🍃"},
+  {min:70, label:"Maturando",emoji:"🌾"},
+  {min:100,label:"Pronta!",  emoji:"✅"},
+];
+const getStage=p=>{let s=STAGES[0];for(const x of STAGES){if(p>=x.min)s=x;}return s;};
+const fmt=sec=>{if(sec<=0)return"00:00";const m=Math.floor(sec/60),s=sec%60;return`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;};
+const ni=v=>Math.max(0,parseInt(v)||0);
+const DEF={custoSemente:50,custoVaso:25,custoRegador:20,custoFert:35,intervaloMin:90,crescPct:5,crescMin:9,qtdAgua:2,qtdFert:2};
+
+function App(){
+  const [cfg,setCfg]=useState(DEF);
+  const [dCfg,setDCfg]=useState(DEF);
+  const [showCfg,setShowCfg]=useState(false);
+  const [plants,setPlants]=useState([]);
+  const [showAdd,setShowAdd]=useState(false);
+  const [showGuide,setShowGuide]=useState(false);
+  const [guideQty,setGuideQty]=useState(1);
+  const [qty,setQty]=useState(1);
+  const [sellPrice,setSellPrice]=useState(1000);
+  const [now,setNow]=useState(Date.now());
+  const [toasts,setToasts]=useState([]);
+  const aRef=useRef(null);
+  const alRef=useRef({});
+
+  const growMin=(100/cfg.crescPct)*cfg.crescMin;
+  const custoAgua=cfg.qtdAgua*cfg.custoRegador;
+  const custoFertTotal=cfg.qtdFert*cfg.custoFert;
+  const custoCuid=custoAgua+custoFertTotal;
+  const custoFixo=cfg.custoSemente+cfg.custoVaso;
+  const custoTotal=custoFixo+custoCuid;
+
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);
+
+  const playAlarm=type=>{
+    try{
+      if(!aRef.current)aRef.current=new(window.AudioContext||window.webkitAudioContext)();
+      const ctx=aRef.current;
+      const freqs=type==="ready"?[880,1100,880,1100,1320]:[440,550,440,550];
+      freqs.forEach((f,i)=>{
+        const o=ctx.createOscillator(),g=ctx.createGain();
+        o.connect(g);g.connect(ctx.destination);
+        o.frequency.value=f;o.type="square";
+        g.gain.setValueAtTime(.07,ctx.currentTime+i*.18);
+        g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+i*.18+.16);
+        o.start(ctx.currentTime+i*.18);o.stop(ctx.currentTime+i*.18+.18);
+      });
+    }catch(e){}
+  };
+
+  const toast=(msg,color="#4ade80")=>{
+    const id=Date.now()+Math.random();
+    setToasts(t=>[...t,{id,msg,color}]);
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);
+  };
+
+  useEffect(()=>{
+    plants.forEach(p=>{
+      const cl=Math.max(0,p.nextCare-now);
+      const k=String(p.id);
+      if(cl===0&&!alRef.current[k]){alRef.current[k]=true;playAlarm("care");toast("⚠️ "+p.name+" — hora de regar + adubar!","#fbbf24");}
+      if(cl>0)alRef.current[k]=false;
+      const pct=gPct(p,now);
+      const rk=k+"_r";
+      if(pct>=100&&!alRef.current[rk]){alRef.current[rk]=true;playAlarm("ready");toast("✅ "+p.name+" pronta para colher!","#4ade80");}
+    });
+  },[now,plants]);
+
+  const gPct=(plant,ts)=>Math.min(100,((ts-plant.plantedAt)/60000/growMin)*100);
+
+  const saveCfg=()=>{
+    const nc={
+      custoSemente:Math.max(0,ni(dCfg.custoSemente)),custoVaso:Math.max(0,ni(dCfg.custoVaso)),
+      custoRegador:Math.max(0,ni(dCfg.custoRegador)),custoFert:Math.max(0,ni(dCfg.custoFert)),
+      intervaloMin:Math.max(1,ni(dCfg.intervaloMin)),crescPct:Math.max(1,ni(dCfg.crescPct)),
+      crescMin:Math.max(1,ni(dCfg.crescMin)),qtdAgua:Math.max(1,ni(dCfg.qtdAgua)),qtdFert:Math.max(1,ni(dCfg.qtdFert)),
+    };
+    setCfg(nc);setShowCfg(false);toast("⚙️ Configurações salvas!","#a78bfa");
+  };
+
+  const addPlant=()=>{
+    const q=Math.max(1,parseInt(qty)||1);
+    const p={
+      id:Date.now(),name:"Planta #"+(plants.length+1),quantity:q,
+      plantedAt:Date.now(),nextCare:Date.now()+cfg.intervaloMin*60*1000,
+      careCount:0,sellPrice:parseInt(sellPrice)||0,sn:{...cfg},
+      costs:{semente:cfg.custoSemente*q,vaso:cfg.custoVaso*q,agua:custoAgua*q,fert:custoFertTotal*q},
+    };
+    setPlants(prev=>[...prev,p]);setShowAdd(false);toast("🌱 "+p.name+" plantada! (×"+q+")");
+  };
+
+  const doCare=id=>{
+    const p=plants.find(x=>x.id===id);if(!p)return;
+    setPlants(prev=>prev.map(x=>x.id===id?{...x,nextCare:Date.now()+x.sn.intervaloMin*60*1000,careCount:x.careCount+1}:x));
+    toast("💧🌿 Rega + adubo registrados!");
+  };
+
+  const rmPlant=id=>setPlants(prev=>prev.filter(p=>p.id!==id));
+  const totalInv=plants.reduce((a,p)=>a+Object.values(p.costs).reduce((x,y)=>x+y,0),0);
+  const totalRev=plants.reduce((a,p)=>a+p.sellPrice*p.quantity,0);
+
+  const S={fontFamily:"'Share Tech Mono',monospace"};
+  const OR={fontFamily:"'Orbitron',monospace"};
+  const inp={background:"#0a140a",border:"1px solid #4ade8033",color:"#d1fae5",padding:"10px 14px",borderRadius:8,...S,fontSize:15,width:"100%"};
+
+  return(
+<div style={{minHeight:"100vh",background:"#060e06",...S,color:"#b6f5c8",position:"relative"}}>
+  <div style={{position:"fixed",inset:0,pointerEvents:"none",backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,80,.012) 3px,rgba(0,255,80,.012) 4px)",zIndex:0}}/>
+  <div style={{position:"fixed",inset:0,pointerEvents:"none",backgroundImage:"radial-gradient(ellipse at 50% 0%,rgba(0,255,80,.07) 0%,transparent 65%)",zIndex:0}}/>
+
+  <div style={{position:"fixed",bottom:24,right:20,zIndex:999,display:"flex",flexDirection:"column",gap:8}}>
+    {toasts.map(t=>(
+      <div key={t.id} style={{background:"#0a140a",border:"1px solid "+t.color,color:t.color,padding:"10px 18px",borderRadius:8,...S,fontSize:13,boxShadow:"0 0 16px "+t.color+"55",animation:"toast 3.5s ease forwards"}}>{t.msg}</div>
+    ))}
+  </div>
+
+  <div style={{position:"relative",zIndex:1,maxWidth:840,margin:"0 auto",padding:"24px 16px 60px"}}>
+
+    <div style={{textAlign:"center",marginBottom:26}}>
+      <div style={{fontSize:10,letterSpacing:8,color:"#4ade8055",marginBottom:6}}>■ FIVEM ■</div>
+      <h1 style={{...OR,fontSize:26,fontWeight:900,color:"#4ade80",textShadow:"0 0 20px #4ade8088,0 0 50px #4ade8033",letterSpacing:3}}>🌿 FARM COMPANION</h1>
+      <div style={{fontSize:10,letterSpacing:4,color:"#4ade8055",marginTop:5}}>GERENCIADOR DE PLANTAÇÃO — FIVEM</div>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+      {[
+        {label:"PLANTAS",   value:plants.length,                                  color:"#4ade80"},
+        {label:"PRONTAS",   value:plants.filter(p=>gPct(p,now)>=100).length,      color:"#fbbf24"},
+        {label:"INVESTIDO", value:"$"+totalInv.toLocaleString(),                  color:"#f87171"},
+        {label:"LUCRO EST.",value:"$"+(totalRev-totalInv).toLocaleString(),        color:"#34d399"},
+      ].map(s=>(
+        <div key={s.label} style={{background:"rgba(0,0,0,.45)",border:"1px solid #4ade8022",borderRadius:10,padding:"12px 8px",textAlign:"center"}}>
+          <div style={{fontSize:19,fontWeight:700,color:s.color,...OR}}>{s.value}</div>
+          <div style={{fontSize:9,color:"#4ade8066",letterSpacing:2,marginTop:3}}>{s.label}</div>
+        </div>
+      ))}
+    </div>
+
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,gap:8,flexWrap:"wrap"}}>
+      <div style={{fontSize:11,color:"#4ade8044"}}>{plants.length===0?"Sem plantas ativas":plants.length+" planta(s) ativa(s)"}</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button onClick={()=>{setDCfg(cfg);setShowCfg(true);}} style={{background:"rgba(167,139,250,.1)",border:"1px solid #a78bfa88",color:"#a78bfa",...S,letterSpacing:2,cursor:"pointer",borderRadius:8,padding:"9px 15px",fontSize:11,fontWeight:700}}>⚙️ CUSTOS</button>
+        <button onClick={()=>setShowGuide(true)} style={{background:"rgba(251,191,36,.1)",border:"1px solid #fbbf2488",color:"#fbbf24",...S,letterSpacing:2,cursor:"pointer",borderRadius:8,padding:"9px 15px",fontSize:11,fontWeight:700}}>🛒 LISTA</button>
+        <button onClick={()=>setShowAdd(true)} style={{background:"linear-gradient(135deg,#14532d,#16a34a)",border:"1px solid #4ade80",color:"#d1fae5",...S,letterSpacing:2,cursor:"pointer",borderRadius:8,padding:"9px 20px",fontSize:12,fontWeight:700}}>+ PLANTAR</button>
+      </div>
+    </div>
+
+    <div style={{background:"rgba(0,0,0,.35)",border:"1px solid #4ade8018",borderRadius:10,padding:"12px 16px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{fontSize:9,color:"#4ade8055",letterSpacing:2}}>💰 CUSTO POR PLANTA</div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+        {[
+          {e:"🌱",l:"Semente",v:cfg.custoSemente},
+          {e:"🪴",l:"Vaso",   v:cfg.custoVaso},
+          {e:"💧",l:`Água ×${cfg.qtdAgua}`,v:custoAgua},
+          {e:"🌿",l:`Fert ×${cfg.qtdFert}`,v:custoFertTotal},
+        ].map(x=>(
+          <div key={x.l} style={{textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#4ade8066"}}>{x.e} {x.l}</div>
+            <div style={{fontSize:13,color:"#4ade80",...OR,fontWeight:700}}>${x.v}</div>
+          </div>
+        ))}
+        <div style={{textAlign:"center",borderLeft:"1px solid #4ade8033",paddingLeft:14}}>
+          <div style={{fontSize:10,color:"#6ee7b7"}}>TOTAL</div>
+          <div style={{fontSize:20,color:"#4ade80",...OR,fontWeight:900}}>${custoTotal}</div>
+        </div>
+      </div>
+    </div>
+
+    {plants.length===0&&(
+      <div style={{border:"1px dashed #4ade8025",borderRadius:14,padding:"60px 24px",textAlign:"center",color:"#4ade8044"}}>
+        <div style={{fontSize:48,marginBottom:14}}>🌱</div>
+        <div style={{fontSize:13,letterSpacing:3}}>NENHUMA PLANTA ATIVA</div>
+        <div style={{fontSize:11,marginTop:8}}>Clique em "+ Plantar" para começar</div>
+      </div>
+    )}
+
+    <div style={{display:"flex",flexDirection:"column",gap:18}}>
+      {plants.map(plant=>{
+        const pct=gPct(plant,now);
+        const stage=getStage(pct);
+        const isReady=pct>=100;
+        const cl=Math.max(0,Math.ceil((plant.nextCare-now)/1000));
+        const needsCare=cl===0;
+        const urgent=!needsCare&&cl<=120;
+        const tc=Object.values(plant.costs).reduce((a,b)=>a+b,0);
+        const rev=plant.sellPrice*plant.quantity;
+        const profit=rev-tc;
+        const roi=tc>0?((profit/tc)*100).toFixed(0):"0";
+        const gl=Math.max(0,Math.ceil(((plant.plantedAt+growMin*60*1000)-now)/1000));
+        const sn=plant.sn;
+        return(
+          <div key={plant.id} className={"card "+(isReady?"rdy":"")} style={{background:"rgba(0,0,0,.55)",border:"1px solid "+(isReady?"#fbbf24":needsCare?"#ef444455":"#4ade8022"),borderRadius:14,padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+              <div>
+                <div style={{fontSize:18,...OR,color:"#4ade80",fontWeight:900}}>
+                  {stage.emoji} {plant.name}
+                  <span style={{fontSize:12,color:"#6ee7b7",...S,marginLeft:10}}>×{plant.quantity}</span>
+                </div>
+                <div style={{fontSize:11,color:"#4ade8066",marginTop:3}}>{stage.label} · Cuidou {plant.careCount}/{sn.qtdAgua}×</div>
+              </div>
+              <button onClick={()=>rmPlant(plant.id)} style={{background:"rgba(239,68,68,.1)",border:"1px solid #ef444433",color:"#f87171",padding:"4px 10px",borderRadius:6,cursor:"pointer",...S,fontSize:10}}>✕</button>
+            </div>
+
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#4ade8066",marginBottom:6}}>
+                <span>CRESCIMENTO</span>
+                <span style={{color:isReady?"#fbbf24":"#4ade80"}}>{isReady?"✅ PRONTA PARA COLHER":pct.toFixed(1)+"% · "+fmt(gl)+" restantes"}</span>
+              </div>
+              <div style={{background:"#0a1a0a",borderRadius:99,height:10,overflow:"hidden",border:"1px solid #4ade8022"}}>
+                <div style={{height:"100%",borderRadius:99,width:pct+"%",background:isReady?"linear-gradient(90deg,#d97706,#fbbf24)":"linear-gradient(90deg,#14532d,#16a34a,#4ade80)",boxShadow:isReady?"0 0 10px #fbbf24":"0 0 8px #4ade8066",transition:"width 1.5s ease"}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#4ade8033",marginTop:3}}>
+                {[0,25,50,75,100].map(v=><span key={v}>{v}%</span>)}
+              </div>
+            </div>
+
+            <div className={needsCare?"crit":urgent?"urg":""} style={{background:needsCare?"rgba(239,68,68,.08)":"rgba(0,0,0,.35)",border:"1px solid "+(needsCare?"#ef4444":urgent?"#fbbf24":"#4ade8022"),borderRadius:12,padding:"14px 18px",marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontSize:10,letterSpacing:2,color:"#4ade8077",marginBottom:5}}>💧🌿 PRÓXIMA REGA + ADUBO</div>
+                  <div style={{...OR,fontSize:30,fontWeight:900,color:needsCare?"#ef4444":urgent?"#fbbf24":"#4ade80",letterSpacing:2,animation:needsCare?"blink .6s infinite":"none"}}>
+                    {needsCare?"CUIDAR AGORA!":fmt(cl)}
+                  </div>
+                  <div style={{fontSize:10,color:"#4ade8044",marginTop:3}}>A cada {sn.intervaloMin}min · {plant.careCount}/{sn.qtdAgua} ciclos</div>
+                </div>
+                <button onClick={()=>doCare(plant.id)} style={{background:needsCare?"linear-gradient(135deg,#1d4ed8,#3b82f6)":"rgba(74,222,128,.08)",border:"1px solid "+(needsCare?"#3b82f6":"#4ade8044"),color:needsCare?"#fff":"#4ade80",minWidth:148,fontSize:11,fontWeight:700,letterSpacing:1,borderRadius:6,cursor:"pointer",...S,padding:"8px 0"}}>✓ JÁ CUIDEI</button>
+              </div>
+            </div>
+
+            <div style={{background:"rgba(0,0,0,.3)",border:"1px solid #4ade8015",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+              <div style={{fontSize:9,letterSpacing:2,color:"#4ade8055",marginBottom:9}}>📋 CUSTO DO LOTE (×{plant.quantity})</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6,marginBottom:8}}>
+                {[["🌱 Semente","$"+plant.costs.semente.toLocaleString()],["🪴 Vaso","$"+plant.costs.vaso.toLocaleString()]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"rgba(74,222,128,.03)",borderRadius:6,border:"1px solid #4ade8011",fontSize:11}}>
+                    <span style={{color:"#4ade8077"}}>{k}</span><span style={{color:"#d1fae5"}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"rgba(0,0,0,.3)",borderRadius:6,border:"1px solid #4ade8011",fontSize:11}}>
+                  <span style={{color:"#93c5fd"}}>💧 Água ×{sn.qtdAgua}</span>
+                  <span style={{color:"#d1fae5"}}>${plant.costs.agua.toLocaleString()}</span>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"rgba(0,0,0,.3)",borderRadius:6,border:"1px solid #4ade8011",fontSize:11}}>
+                  <span style={{color:"#86efac"}}>🌿 Fert ×{sn.qtdFert}</span>
+                  <span style={{color:"#d1fae5"}}>${plant.costs.fert.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,borderTop:"1px solid #4ade8015",paddingTop:12}}>
+              {[
+                {label:"CUSTO", value:"$"+tc.toLocaleString(),    color:"#f87171"},
+                {label:"VENDA", value:"$"+rev.toLocaleString(),    color:"#6ee7b7"},
+                {label:"LUCRO", value:"$"+profit.toLocaleString(), color:profit>0?"#4ade80":"#f87171"},
+                {label:"ROI",   value:roi+"%",                     color:profit>0?"#34d399":"#f87171"},
+              ].map(s=>(
+                <div key={s.label} style={{textAlign:"center"}}>
+                  <div style={{...OR,fontSize:13,color:s.color,fontWeight:700}}>{s.value}</div>
+                  <div style={{fontSize:8,color:"#4ade8044",letterSpacing:2,marginTop:3}}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+
+  {/* ═══ MODAL CUSTOS ═══ */}
+  {showCfg&&(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
+      <div style={{background:"#07090f",border:"1px solid #a78bfa55",borderRadius:16,padding:26,width:"100%",maxWidth:520,boxShadow:"0 0 60px #a78bfa15",animation:"fadeUp .3s ease",margin:"20px auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h2 style={{...OR,color:"#a78bfa",fontSize:15,letterSpacing:2}}>⚙️ CONFIGURAR CUSTOS</h2>
+          <button onClick={()=>setShowCfg(false)} style={{background:"transparent",border:"none",color:"#a78bfa66",cursor:"pointer",fontSize:20}}>✕</button>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+          <div style={{background:"rgba(167,139,250,.04)",border:"1px solid #a78bfa22",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontSize:9,letterSpacing:3,color:"#a78bfa66",marginBottom:12}}>💵 PREÇO UNITÁRIO DOS ITENS</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[
+                {k:"custoSemente",e:"🌱",l:"Semente"},
+                {k:"custoVaso",   e:"🪴",l:"Vaso"},
+                {k:"custoRegador",e:"💧",l:"Regador (1 uso)"},
+                {k:"custoFert",   e:"🌿",l:"Fertilizante (1 uso)"},
+              ].map(f=>(
+                <div key={f.k}>
+                  <label style={{fontSize:9,color:"#a78bfa77",letterSpacing:1,display:"block",marginBottom:5}}>{f.e} {f.l.toUpperCase()}</label>
+                  <div style={{display:"flex",alignItems:"center",background:"#0a0d14",border:"1px solid #a78bfa33",borderRadius:7,overflow:"hidden"}}>
+                    <span style={{padding:"0 10px",color:"#a78bfa66",fontSize:13}}>$</span>
+                    <input type="number" min="0" value={dCfg[f.k]}
+                      onChange={e=>setDCfg(d=>({...d,[f.k]:e.target.value}))}
+                      style={{flex:1,background:"transparent",border:"none",color:"#e2d9f3",padding:"9px 8px 9px 0",...OR,fontSize:14,fontWeight:700}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{background:"rgba(74,222,128,.04)",border:"1px solid #4ade8022",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontSize:9,letterSpacing:3,color:"#4ade8055",marginBottom:12}}>🔢 QUANTIDADE POR CICLO COMPLETO</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[
+                {k:"qtdAgua",e:"💧",l:"Qtd. de Águas",  h:"quantas vezes rega no ciclo"},
+                {k:"qtdFert",e:"🌿",l:"Qtd. Fertilizantes",h:"quantas vezes aduba no ciclo"},
+              ].map(f=>(
+                <div key={f.k}>
+                  <label style={{fontSize:9,color:"#4ade8077",letterSpacing:1,display:"block",marginBottom:5}}>{f.e} {f.l.toUpperCase()}</label>
+                  <div style={{display:"flex",alignItems:"center",background:"#0a140a",border:"1px solid #4ade8033",borderRadius:7,overflow:"hidden"}}>
+                    <input type="number" min="1" value={dCfg[f.k]}
+                      onChange={e=>setDCfg(d=>({...d,[f.k]:e.target.value}))}
+                      style={{flex:1,background:"transparent",border:"none",color:"#d1fae5",padding:"9px 14px",...OR,fontSize:18,fontWeight:900,textAlign:"center"}}/>
+                    <span style={{padding:"0 10px",color:"#4ade8066",fontSize:10}}>×</span>
+                  </div>
+                  <div style={{fontSize:9,color:"#4ade8044",marginTop:4}}>{f.h}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:12,padding:"10px 12px",background:"rgba(0,0,0,.3)",borderRadius:8,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:11}}>
+              <span style={{color:"#4ade8066"}}>💧 {ni(dCfg.qtdAgua)}×${ni(dCfg.custoRegador)} + 🌿 {ni(dCfg.qtdFert)}×${ni(dCfg.custoFert)}</span>
+              <span style={{color:"#4ade80",...OR,fontWeight:700}}>= ${ni(dCfg.qtdAgua)*ni(dCfg.custoRegador)+ni(dCfg.qtdFert)*ni(dCfg.custoFert)} em cuidados</span>
+            </div>
+          </div>
+
+          <div style={{background:"rgba(251,191,36,.04)",border:"1px solid #fbbf2422",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontSize:9,letterSpacing:3,color:"#fbbf2055",marginBottom:12}}>⏱ INTERVALOS DE TEMPO</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <label style={{fontSize:9,color:"#fbbf2077",letterSpacing:1,display:"block",marginBottom:5}}>💧 REGA A CADA (MIN)</label>
+                <input type="number" min="1" value={dCfg.intervaloMin}
+                  onChange={e=>setDCfg(d=>({...d,intervaloMin:e.target.value}))}
+                  style={{width:"100%",background:"#14100a",border:"1px solid #fbbf2433",color:"#fef3c7",padding:"9px 12px",borderRadius:7,...OR,fontSize:14,fontWeight:700}}/>
+              </div>
+              <div>
+                <label style={{fontSize:9,color:"#fbbf2077",letterSpacing:1,display:"block",marginBottom:5}}>📈 CRESCIMENTO A CADA (MIN)</label>
+                <input type="number" min="1" value={dCfg.crescMin}
+                  onChange={e=>setDCfg(d=>({...d,crescMin:e.target.value}))}
+                  style={{width:"100%",background:"#14100a",border:"1px solid #fbbf2433",color:"#fef3c7",padding:"9px 12px",borderRadius:7,...OR,fontSize:14,fontWeight:700}}/>
+              </div>
+              <div>
+                <label style={{fontSize:9,color:"#fbbf2077",letterSpacing:1,display:"block",marginBottom:5}}>📈 % CRESCIMENTO POR TICK</label>
+                <input type="number" min="1" max="100" value={dCfg.crescPct}
+                  onChange={e=>setDCfg(d=>({...d,crescPct:e.target.value}))}
+                  style={{width:"100%",background:"#14100a",border:"1px solid #fbbf2433",color:"#fef3c7",padding:"9px 12px",borderRadius:7,...OR,fontSize:14,fontWeight:700}}/>
+              </div>
+              <div style={{padding:"12px",background:"rgba(0,0,0,.3)",borderRadius:7,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                <div style={{fontSize:9,color:"#fbbf2055",marginBottom:4}}>⏱ TEMPO TOTAL DO CICLO</div>
+                <div style={{...OR,fontSize:17,color:"#fbbf24",fontWeight:700}}>
+                  {(100/Math.max(1,ni(dCfg.crescPct)))*Math.max(1,ni(dCfg.crescMin))} min
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{background:"rgba(74,222,128,.07)",border:"1px solid #4ade8044",borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{fontSize:10,color:"#6ee7b7",marginBottom:3}}>💰 NOVO CUSTO TOTAL POR PLANTA</div>
+              <div style={{fontSize:10,color:"#4ade8044"}}>${ni(dCfg.custoSemente)+ni(dCfg.custoVaso)} fixo + ${ni(dCfg.qtdAgua)*ni(dCfg.custoRegador)+ni(dCfg.qtdFert)*ni(dCfg.custoFert)} cuidados</div>
+            </div>
+            <div style={{...OR,fontSize:28,color:"#4ade80",fontWeight:900,textShadow:"0 0 16px #4ade8055"}}>
+              ${ni(dCfg.custoSemente)+ni(dCfg.custoVaso)+ni(dCfg.qtdAgua)*ni(dCfg.custoRegador)+ni(dCfg.qtdFert)*ni(dCfg.custoFert)}
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setShowCfg(false)} style={{flex:1,background:"transparent",border:"1px solid #a78bfa22",color:"#a78bfa66",padding:"11px 0",borderRadius:8,cursor:"pointer",...S,fontSize:11,letterSpacing:2}}>CANCELAR</button>
+            <button onClick={saveCfg} style={{flex:2,background:"linear-gradient(135deg,#4c1d95,#7c3aed)",border:"1px solid #a78bfa",color:"#ede9fe",padding:"11px 0",borderRadius:8,cursor:"pointer",...S,fontSize:12,fontWeight:900,letterSpacing:2}}>✓ SALVAR</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* ═══ MODAL LISTA ═══ */}
+  {showGuide&&(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
+      <div style={{background:"#070d04",border:"1px solid #fbbf2444",borderRadius:16,padding:26,width:"100%",maxWidth:500,boxShadow:"0 0 60px #fbbf2415",animation:"fadeUp .3s ease",margin:"20px auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h2 style={{...OR,color:"#fbbf24",fontSize:15,letterSpacing:2}}>🛒 LISTA DE COMPRAS</h2>
+          <button onClick={()=>setShowGuide(false)} style={{background:"transparent",border:"none",color:"#fbbf2466",cursor:"pointer",fontSize:20}}>✕</button>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <label style={{fontSize:10,color:"#fbbf2077",letterSpacing:2,display:"block",marginBottom:6}}>QUANTAS PLANTAS?</label>
+            <input type="number" min="1" value={guideQty}
+              onChange={e=>setGuideQty(Math.max(1,parseInt(e.target.value)||1))}
+              style={{width:"100%",background:"#0a140a",border:"1px solid #fbbf2433",color:"#fef3c7",padding:"12px 14px",borderRadius:8,...OR,fontSize:24,fontWeight:900,textAlign:"center"}}/>
+          </div>
+          {(()=>{
+            const q=Math.max(1,guideQty);
+            const itens=[
+              {e:"🌱",n:"Semente",      qtd:q,              u:cfg.custoSemente,  tot:cfg.custoSemente*q,      c:"#86efac"},
+              {e:"🪴",n:"Vaso",          qtd:q,              u:cfg.custoVaso,     tot:cfg.custoVaso*q,          c:"#86efac"},
+              {e:"💧",n:"Água (regador)",qtd:cfg.qtdAgua*q,  u:cfg.custoRegador,  tot:cfg.custoRegador*cfg.qtdAgua*q,  c:"#93c5fd"},
+              {e:"🌿",n:"Fertilizante",  qtd:cfg.qtdFert*q,  u:cfg.custoFert,     tot:cfg.custoFert*cfg.qtdFert*q,     c:"#6ee7b7"},
+            ];
+            const tot=itens.reduce((a,b)=>a+b.tot,0);
+            return(
+              <>
+                <div style={{background:"rgba(0,0,0,.4)",border:"1px solid #fbbf2422",borderRadius:10,overflow:"hidden"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"8px 14px",background:"rgba(251,191,36,.06)",borderBottom:"1px solid #fbbf2422"}}>
+                    {["ITEM","QTD","UNIT.","TOTAL"].map(h=>(<div key={h} style={{fontSize:9,letterSpacing:2,color:"#fbbf2077",textAlign:h==="ITEM"?"left":"right"}}>{h}</div>))}
+                  </div>
+                  {itens.map((it,i)=>(
+                    <div key={it.n} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",padding:"11px 14px",borderBottom:i<itens.length-1?"1px solid #fbbf2411":"none",alignItems:"center"}}>
+                      <div style={{fontSize:13,color:it.c}}>{it.e} {it.n}</div>
+                      <div style={{textAlign:"right",...OR,fontSize:14,fontWeight:900,color:"#fef3c7"}}>{it.qtd}</div>
+                      <div style={{textAlign:"right",fontSize:11,color:"#fbbf2055"}}>${it.u}</div>
+                      <div style={{textAlign:"right",...OR,fontSize:13,fontWeight:700,color:"#fbbf24"}}>${it.tot.toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{background:"rgba(251,191,36,.04)",border:"1px solid #fbbf2022",borderRadius:8,padding:"9px 13px",fontSize:10,color:"#fbbf2055"}}>
+                  💡 Água: {cfg.qtdAgua}×/planta · Fertilizante: {cfg.qtdFert}×/planta · Ciclo total: {growMin}min
+                </div>
+                <div style={{background:"rgba(251,191,36,.08)",border:"2px solid #fbbf2466",borderRadius:10,padding:"16px 20px"}}>
+                  <div style={{fontSize:9,letterSpacing:3,color:"#fbbf2077",marginBottom:7}}>💰 TOTAL PARA LEVAR</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <div style={{fontSize:11,color:"#fbbf2055"}}>{q} planta{q>1?"s":""} × ${custoTotal}/cada</div>
+                    <div style={{...OR,fontSize:32,fontWeight:900,color:"#fbbf24",textShadow:"0 0 20px #fbbf2488"}}>${tot.toLocaleString()}</div>
+                  </div>
+                </div>
+                <button onClick={()=>{setShowGuide(false);setQty(guideQty);setShowAdd(true);}}
+                  style={{width:"100%",background:"linear-gradient(135deg,#14532d,#16a34a)",border:"1px solid #4ade80",color:"#d1fae5",padding:"13px 0",borderRadius:8,cursor:"pointer",...S,fontSize:13,fontWeight:900,letterSpacing:2}}>
+                  🌱 JÁ COMPREI — PLANTAR AGORA
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* ═══ MODAL NOVA PLANTA ═══ */}
+  {showAdd&&(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.88)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
+      <div style={{background:"#070f07",border:"1px solid #4ade8044",borderRadius:16,padding:26,width:"100%",maxWidth:440,boxShadow:"0 0 60px #4ade8022",animation:"fadeUp .3s ease",margin:"20px auto"}}>
+        <h2 style={{...OR,color:"#4ade80",fontSize:15,marginBottom:20,letterSpacing:2}}>🌱 NOVA PLANTAÇÃO</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <label style={{fontSize:10,color:"#4ade8077",letterSpacing:2,display:"block",marginBottom:6}}>QUANTIDADE DE PLANTAS</label>
+            <input type="number" min="1" value={qty} onChange={e=>setQty(e.target.value)} style={inp}/>
+          </div>
+          <div>
+            <label style={{fontSize:10,color:"#4ade8077",letterSpacing:2,display:"block",marginBottom:6}}>PREÇO DE VENDA (por unidade)</label>
+            <input type="number" min="0" value={sellPrice} onChange={e=>setSellPrice(e.target.value)} style={inp}/>
+          </div>
+          {(()=>{
+            const q=Math.max(1,parseInt(qty)||1);
+            const sp=parseInt(sellPrice)||0;
+            const cost=custoTotal*q;
+            const rev=sp*q;
+            const luc=rev-cost;
+            return(
+              <div style={{background:"rgba(74,222,128,.04)",border:"1px solid #4ade8022",borderRadius:10,padding:14}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"#4ade8055",marginBottom:9}}>RESUMO DO LOTE</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,fontSize:11,marginBottom:9}}>
+                  {[
+                    ["Qtd",               q+" plantas"],
+                    ["Fixo",              "$"+(custoFixo*q).toLocaleString()],
+                    ["💧 Água ("+cfg.qtdAgua+"×)", "$"+(custoAgua*q).toLocaleString()],
+                    ["🌿 Fert ("+cfg.qtdFert+"×)", "$"+(custoFertTotal*q).toLocaleString()],
+                    ["Custo total",       "$"+cost.toLocaleString()],
+                    ["Lucro est.",        "$"+luc.toLocaleString()],
+                  ].map(([k,v])=>(
+                    <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",background:"rgba(0,0,0,.3)",borderRadius:6}}>
+                      <span style={{color:"#4ade8066"}}>{k}</span>
+                      <span style={{color:k==="Lucro est."?(luc>=0?"#4ade80":"#f87171"):"#d1fae5"}}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:9,color:"#4ade8044"}}>⏱ {growMin}min · rega a cada {cfg.intervaloMin}min</div>
+              </div>
+            );
+          })()}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setShowAdd(false)} style={{flex:1,background:"transparent",border:"1px solid #4ade8022",color:"#4ade8077",padding:"11px 0",borderRadius:8,cursor:"pointer",...S,fontSize:11,letterSpacing:2}}>CANCELAR</button>
+            <button onClick={addPlant} style={{flex:2,background:"linear-gradient(135deg,#14532d,#16a34a)",border:"1px solid #4ade80",color:"#d1fae5",padding:"11px 0",borderRadius:8,cursor:"pointer",...S,fontSize:12,fontWeight:900,letterSpacing:2}}>🌱 PLANTAR</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )}
+</div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
