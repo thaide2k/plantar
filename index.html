@@ -43,6 +43,27 @@ const fmt=sec=>{if(sec<=0)return"00:00";const m=Math.floor(sec/60),s=sec%60;retu
 const ni=v=>Math.max(0,parseInt(v)||0);
 const fmtSP=ts=>new Date(ts).toLocaleTimeString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit"});
 const fmtSPFull=ts=>new Date(ts).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
+const toICSDate=ts=>{const d=new Date(ts);return d.toISOString().replace(/[-:]/g,"").split(".")[0]+"Z";};
+const downloadICS=(plant,growMin,intervaloMin)=>{
+  const care1=plant.plantedAt+intervaloMin*60*1000;
+  const harvest=plant.plantedAt+growMin*60*1000;
+  const uid=()=>Math.random().toString(36).substr(2,9)+"@farmcompanion";
+  const alarm=(minBefore)=>`BEGIN:VALARM\r\nTRIGGER:-PT${minBefore}M\r\nACTION:DISPLAY\r\nDESCRIPTION:Lembrete Farm Companion\r\nEND:VALARM`;
+  const evt=(uid,start,end,summary,desc)=>
+    `BEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:${toICSDate(Date.now())}\r\nDTSTART:${toICSDate(start)}\r\nDTEND:${toICSDate(end)}\r\nSUMMARY:${summary}\r\nDESCRIPTION:${desc}\r\n${alarm(5)}\r\nEND:VEVENT`;
+  const lines=[
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Farm Companion//FiveM//PT","CALSCALE:GREGORIAN","METHOD:PUBLISH",
+    evt(uid(),care1,care1+5*60*1000,`💧 Regar + Adubar — ${plant.name}`,"Hora de regar e adubar sua planta no FiveM! Lembrete com 5min de antecedência."),
+    evt(uid(),harvest,harvest+5*60*1000,`🌾 Colher — ${plant.name} (×${plant.quantity})`,"Sua planta está pronta para colheita no FiveM! Lembrete com 5min de antecedência."),
+    "END:VCALENDAR"
+  ].join("\r\n");
+  const blob=new Blob([lines],{type:"text/calendar;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=`farm-${plant.name.replace(/\s/g,"-").toLowerCase()}.ics`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
 const DEF={custoSemente:50,custoVaso:25,custoRegador:20,custoFert:35,intervaloMin:90,crescPct:5,crescMin:9,qtdAgua:2,qtdFert:2};
 
 function App(){
@@ -236,6 +257,12 @@ function App(){
                 <div style={{fontSize:11,color:"#4ade8066",marginTop:3}}>{stage.label} · Cuidou {plant.careCount}/{sn.qtdAgua}×</div>
               </div>
               <button onClick={()=>rmPlant(plant.id)} style={{background:"rgba(239,68,68,.1)",border:"1px solid #ef444433",color:"#f87171",padding:"4px 10px",borderRadius:6,cursor:"pointer",...S,fontSize:10}}>✕</button>
+            </div>
+            <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+              <button onClick={()=>downloadICS(plant,growMin,sn.intervaloMin)}
+                style={{flex:1,background:"rgba(99,102,241,.12)",border:"1px solid #6366f144",color:"#a5b4fc",padding:"7px 10px",borderRadius:7,cursor:"pointer",...S,fontSize:10,letterSpacing:1,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                📅 <span>SALVAR NO CALENDÁRIO</span>
+              </button>
             </div>
 
             <div style={{marginBottom:16}}>
