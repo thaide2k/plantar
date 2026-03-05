@@ -7,7 +7,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060e06;overflow-x:hidden}
@@ -16,6 +16,8 @@ body{background:#060e06;overflow-x:hidden}
 @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.15}}
 @keyframes toast{0%{opacity:0;transform:translateY(16px)}12%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
+@keyframes pulse{from{opacity:0.6}to{opacity:1}}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.06)}100%{transform:scale(1)}}
 .urg{animation:gY 1.2s infinite}
 .crit{animation:gR 0.8s infinite}
 .rdy{animation:gY 1.5s infinite}
@@ -25,12 +27,17 @@ input[type=number]::-webkit-inner-spin-button{opacity:.4}
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-track{background:#0a140a}
 ::-webkit-scrollbar-thumb{background:#4ade8044;border-radius:3px}
+.sujo-popping{animation:pop 0.25s ease}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useRef}=React;
+const {useState,useEffect,useRef,useCallback}=React;
+
+/* ══════════════════════════════════════════════
+   FARM COMPANION — constantes e helpers
+══════════════════════════════════════════════ */
 const STAGES=[
   {min:0,  label:"Semente",  emoji:"🌱"},
   {min:20, label:"Brotando", emoji:"🌿"},
@@ -42,7 +49,6 @@ const getStage=p=>{let s=STAGES[0];for(const x of STAGES){if(p>=x.min)s=x;}retur
 const fmt=sec=>{if(sec<=0)return"00:00";const m=Math.floor(sec/60),s=sec%60;return`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;};
 const ni=v=>Math.max(0,parseInt(v)||0);
 const fmtSP=ts=>new Date(ts).toLocaleTimeString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit"});
-const fmtSPFull=ts=>new Date(ts).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
 const toICSDate=ts=>{const d=new Date(ts);return d.toISOString().replace(/[-:]/g,"").split(".")[0]+"Z";};
 const downloadICS=(plant,growMin,intervaloMin)=>{
   const care1=plant.plantedAt+intervaloMin*60*1000;
@@ -53,8 +59,8 @@ const downloadICS=(plant,growMin,intervaloMin)=>{
     `BEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:${toICSDate(Date.now())}\r\nDTSTART:${toICSDate(start)}\r\nDTEND:${toICSDate(end)}\r\nSUMMARY:${summary}\r\nDESCRIPTION:${desc}\r\n${alarm(5)}\r\nEND:VEVENT`;
   const lines=[
     "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Farm Companion//FiveM//PT","CALSCALE:GREGORIAN","METHOD:PUBLISH",
-    evt(uid(),care1,care1+5*60*1000,`💧 Regar + Adubar — ${plant.name}`,"Hora de regar e adubar sua planta no FiveM! Lembrete com 5min de antecedência."),
-    evt(uid(),harvest,harvest+5*60*1000,`🌾 Colher — ${plant.name} (×${plant.quantity})`,"Sua planta está pronta para colheita no FiveM! Lembrete com 5min de antecedência."),
+    evt(uid(),care1,care1+5*60*1000,`💧 Regar + Adubar — ${plant.name}`,"Hora de regar e adubar sua planta no FiveM!"),
+    evt(uid(),harvest,harvest+5*60*1000,`🌾 Colher — ${plant.name} (×${plant.quantity})`,"Sua planta está pronta para colheita no FiveM!"),
     "END:VCALENDAR"
   ].join("\r\n");
   const blob=new Blob([lines],{type:"text/calendar;charset=utf-8"});
@@ -66,7 +72,217 @@ const downloadICS=(plant,growMin,intervaloMin)=>{
 };
 const DEF={custoSemente:50,custoVaso:25,custoRegador:20,custoFert:35,intervaloMin:90,crescPct:5,crescMin:9,qtdAgua:2,qtdFert:2};
 
+/* ══════════════════════════════════════════════
+   CALCULADORA SUJO — componente
+══════════════════════════════════════════════ */
+function CalcSujo(){
+  const S2={fontFamily:"'Share Tech Mono',monospace"};
+  const RJ={fontFamily:"'Rajdhani',sans-serif"};
+  const OR={fontFamily:"'Orbitron',monospace"};
+
+  const [qty,setQty]=useState("");
+  const [unitPrice,setUnitPrice]=useState("");
+  const [sujoTotal,setSujoTotal]=useState("");
+  const [popEl,setPopEl]=useState(null);
+
+  const triggerPop=id=>{
+    setPopEl(id);
+    setTimeout(()=>setPopEl(null),300);
+  };
+
+  const q=parseFloat(qty)||0;
+  const u=parseFloat(unitPrice)||0;
+  const sj=parseFloat(sujoTotal)||0;
+
+  const totalCost=q*u;
+  const sujo60=sj*0.6;
+  const sujo40=sj*0.4;
+  const profit=sujo60-totalCost;
+  const avgUnit=q>0?sujo60/q:0;
+  const avgProfit=q>0?profit/q:0;
+  const avgCost=q>0?totalCost/q:0;
+
+  const empty=sj===0&&totalCost===0;
+
+  const fmtR=val=>"R$ "+val.toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".");
+
+  const resetAll=()=>{setQty("");setUnitPrice("");setSujoTotal("");};
+
+  const GOLD="#c9a84c";
+  const GOLD_L="#f0c96e";
+  const GOLD_D="#7a6230";
+  const GREEN="#39e08a";
+  const RED="#e05050";
+  const MUTED="#5a6070";
+  const PANEL="#111318";
+  const BORDER="#1e2330";
+  const TEXT="#d8dde8";
+
+  const card={
+    background:PANEL,border:"1px solid "+BORDER,borderRadius:14,padding:24,marginBottom:14,
+    position:"relative",overflow:"hidden",animation:"fadeUp 0.5s ease both"
+  };
+  const fieldLabel={fontSize:"0.78rem",fontWeight:600,color:MUTED,letterSpacing:"0.08em",
+    textTransform:"uppercase",...RJ,display:"block",marginBottom:6};
+  const inputBase={
+    background:"rgba(255,255,255,0.04)",border:"1px solid "+BORDER,borderRadius:8,color:TEXT,
+    ...S2,fontSize:"1.05rem",padding:"12px 14px",outline:"none",width:"100%",transition:"border-color .2s,background .2s,box-shadow .2s"
+  };
+  const resultLabel={fontSize:"0.9rem",color:MUTED,fontWeight:600,letterSpacing:"0.04em",...RJ};
+  const resultVal={...S2,fontSize:"1.05rem",color:TEXT,transition:"all .3s ease"};
+
+  const profitColor=empty?MUTED:profit>0?GREEN:profit<0?RED:MUTED;
+  const profitText=empty?"R$ 0,00":fmtR(Math.abs(profit));
+  const profitSub=empty?"Preencha os campos acima":
+    profit>0?`Você lucrou ${fmtR(profit)} nessa operação 🚀`:
+    profit<0?`Você teve prejuízo de ${fmtR(Math.abs(profit))} nessa operação`:
+    "Operação zerada — sem lucro, sem prejuízo";
+  const badgeLabel=empty?"aguardando":profit>0?"📈 Lucro":profit<0?"📉 Prejuízo":"⚖️ Neutro";
+  const badgeBg=empty?"rgba(90,96,112,.15)":profit>0?"rgba(57,224,138,.12)":profit<0?"rgba(224,80,80,.12)":"rgba(90,96,112,.15)";
+  const badgeColor=empty?MUTED:profit>0?GREEN:profit<0?RED:MUTED;
+  const badgeBorder=empty?"rgba(90,96,112,.2)":profit>0?"rgba(57,224,138,.25)":profit<0?"rgba(224,80,80,.25)":"rgba(90,96,112,.2)";
+
+  return(
+    <div style={{maxWidth:520,margin:"0 auto",padding:"0 0 40px",position:"relative",zIndex:1}}>
+
+      {/* Background decorativo */}
+      <div style={{position:"fixed",inset:0,backgroundImage:"linear-gradient(rgba(201,168,76,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(201,168,76,0.025) 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none",zIndex:0}}/>
+
+      {/* Header */}
+      <div style={{textAlign:"center",marginBottom:28,animation:"fadeUp .5s ease"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,marginBottom:6}}>
+          <div style={{width:44,height:44,background:`linear-gradient(135deg,${GOLD},${GOLD_D})`,borderRadius:10,
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,
+            boxShadow:`0 0 20px rgba(201,168,76,0.3)`}}>💰</div>
+          <div style={{fontSize:"2rem",fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",
+            background:`linear-gradient(135deg,${GOLD_L},${GOLD},#8a6a20)`,
+            WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",...RJ}}>
+            Calc Sujo
+          </div>
+        </div>
+        <div style={{...S2,fontSize:"0.72rem",color:MUTED,letterSpacing:"0.2em",textTransform:"uppercase"}}>
+          Calculadora de Ganhos em Moeda Virtual
+        </div>
+      </div>
+
+      {/* Card 1 — Compra */}
+      <div style={{...card,animationDelay:"0.1s"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${GOLD},transparent)`,opacity:.6}}/>
+        <div style={{...S2,fontSize:"0.68rem",color:GOLD_D,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:4}}>Passo 01</div>
+        <div style={{...RJ,fontSize:"1.15rem",fontWeight:700,color:TEXT,letterSpacing:"0.05em",marginBottom:20}}>
+          Itens Comprados{" "}
+          <span style={{...S2,fontSize:"0.65rem",letterSpacing:"0.15em",padding:"2px 8px",borderRadius:4,background:`rgba(201,168,76,0.12)`,color:GOLD,border:`1px solid rgba(201,168,76,0.2)`,verticalAlign:"middle",marginLeft:8}}>COMPRA</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div>
+            <label style={fieldLabel}>Quantidade</label>
+            <input type="number" min="0" step="1" placeholder="0" value={qty}
+              onChange={e=>{setQty(e.target.value);triggerPop("cost");}}
+              style={inputBase}/>
+          </div>
+          <div>
+            <label style={fieldLabel}>Valor Unitário ($)</label>
+            <input type="number" min="0" step="0.01" placeholder="0,00" value={unitPrice}
+              onChange={e=>{setUnitPrice(e.target.value);triggerPop("cost");}}
+              style={inputBase}/>
+          </div>
+        </div>
+        <hr style={{border:"none",borderTop:"1px solid "+BORDER,margin:"18px 0"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={resultLabel}>Total investido</span>
+          <span className={popEl==="cost"?"sujo-popping":""} style={{...resultVal,color:GOLD_L,fontSize:"1.2rem"}}>{fmtR(totalCost)}</span>
+        </div>
+      </div>
+
+      {/* Card 2 — Sujo */}
+      <div style={{...card,animationDelay:"0.2s"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${GREEN},transparent)`,opacity:.6}}/>
+        <div style={{...S2,fontSize:"0.68rem",color:GOLD_D,letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:4}}>Passo 02</div>
+        <div style={{...RJ,fontSize:"1.15rem",fontWeight:700,color:TEXT,letterSpacing:"0.05em",marginBottom:20}}>
+          Ganho em Sujo{" "}
+          <span style={{...S2,fontSize:"0.65rem",letterSpacing:"0.15em",padding:"2px 8px",borderRadius:4,background:"rgba(57,224,138,0.1)",color:GREEN,border:"1px solid rgba(57,224,138,0.2)",verticalAlign:"middle",marginLeft:8}}>SUJO</span>
+        </div>
+        <div>
+          <label style={fieldLabel}>Total recebido em Sujo</label>
+          <input type="number" min="0" step="0.01" placeholder="0,00" value={sujoTotal}
+            onChange={e=>{setSujoTotal(e.target.value);triggerPop("sujo60");}}
+            style={{...inputBase}}/>
+        </div>
+        <hr style={{border:"none",borderTop:"1px solid "+BORDER,margin:"18px 0"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0"}}>
+          <span style={resultLabel}>60% do Sujo (valor real)</span>
+          <span className={popEl==="sujo60"?"sujo-popping":""} style={{...resultVal,color:GOLD_L,fontSize:"1.2rem"}}>{fmtR(sujo60)}</span>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0"}}>
+          <span style={resultLabel}>40% retido</span>
+          <span style={{...resultVal,color:MUTED}}>{fmtR(sujo40)}</span>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0"}}>
+          <span style={resultLabel}>Valor médio por unidade</span>
+          <span style={{...resultVal,color:GOLD_L}}>{fmtR(avgUnit)}</span>
+        </div>
+      </div>
+
+      {/* Card resultado */}
+      <div style={{
+        background:PANEL,border:"1px solid "+BORDER,borderRadius:14,padding:"28px 24px",
+        textAlign:"center",position:"relative",overflow:"hidden",animation:"fadeUp 0.5s ease 0.4s both"
+      }}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:2,
+          background:`linear-gradient(90deg,transparent,${empty?GREEN:profit>=0?GREEN:RED},transparent)`}}/>
+        <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",
+          width:200,height:200,borderRadius:"50%",
+          background:`radial-gradient(circle,${profit<0?"rgba(224,80,80,0.07)":"rgba(57,224,138,0.07)"} 0%,transparent 70%)`,
+          pointerEvents:"none",transition:"background .4s"}}/>
+
+        <div style={{...S2,fontSize:"0.68rem",letterSpacing:"0.22em",textTransform:"uppercase",color:MUTED,marginBottom:10}}>
+          ✦ Lucro Real da Operação ✦
+        </div>
+        <div className={popEl==="profit"?"sujo-popping":""} style={{
+          fontFamily:"'Rajdhani',sans-serif",fontSize:"2.8rem",fontWeight:700,
+          letterSpacing:"0.02em",color:profitColor,transition:"color .3s",lineHeight:1,marginBottom:4
+        }}>{profitText}</div>
+        <div style={{...RJ,fontSize:"0.8rem",color:MUTED,fontWeight:500,marginBottom:10}}>{profitSub}</div>
+        <div>
+          <span style={{
+            display:"inline-block",padding:"3px 10px",borderRadius:20,
+            ...S2,fontSize:"0.72rem",fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",marginTop:10,
+            background:badgeBg,color:badgeColor,border:"1px solid "+badgeBorder
+          }}>{badgeLabel}</span>
+        </div>
+
+        <hr style={{border:"none",borderTop:"1px solid "+BORDER,margin:"18px 0 0"}}/>
+        <div style={{display:"flex",justifyContent:"center",gap:40,marginTop:14}}>
+          <div style={{textAlign:"center"}}>
+            <div style={{...RJ,fontSize:"0.7rem",color:MUTED,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>Ganho médio / unidade</div>
+            <div style={{...S2,fontSize:"1.15rem",color:profit<0?RED:profit>0?GREEN:MUTED}}>{fmtR(Math.abs(avgProfit))}</div>
+          </div>
+          <div style={{textAlign:"center"}}>
+            <div style={{...RJ,fontSize:"0.7rem",color:MUTED,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>Custo médio / unidade</div>
+            <div style={{...S2,fontSize:"1.15rem",color:MUTED}}>{fmtR(avgCost)}</div>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={resetAll} style={{
+        display:"block",width:"100%",marginTop:14,padding:12,background:"transparent",
+        border:"1px solid "+BORDER,borderRadius:8,color:MUTED,...RJ,fontSize:"0.85rem",
+        fontWeight:600,letterSpacing:"0.1em",textTransform:"uppercase",cursor:"pointer",
+        animation:"fadeUp 0.5s ease 0.5s both",transition:"all .2s"
+      }}
+      onMouseEnter={e=>{e.target.style.borderColor=GOLD_D;e.target.style.color=GOLD;e.target.style.background="rgba(201,168,76,0.05)";}}
+      onMouseLeave={e=>{e.target.style.borderColor=BORDER;e.target.style.color=MUTED;e.target.style.background="transparent";}}>
+        ↺ &nbsp;Limpar Tudo
+      </button>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════
+   APP PRINCIPAL
+══════════════════════════════════════════════ */
 function App(){
+  const [activeTab,setActiveTab]=useState("farm");
   const [cfg,setCfg]=useState(DEF);
   const [dCfg,setDCfg]=useState(DEF);
   const [showCfg,setShowCfg]=useState(false);
@@ -161,11 +377,18 @@ function App(){
   const OR={fontFamily:"'Orbitron',monospace"};
   const inp={background:"#0a140a",border:"1px solid #4ade8033",color:"#d1fae5",padding:"10px 14px",borderRadius:8,...S,fontSize:15,width:"100%"};
 
+  /* ── TAB BAR ── */
+  const tabs=[
+    {id:"farm", icon:"🌿", label:"FARM"},
+    {id:"sujo", icon:"💰", label:"CALC SUJO"},
+  ];
+
   return(
 <div style={{minHeight:"100vh",background:"#060e06",...S,color:"#b6f5c8",position:"relative"}}>
   <div style={{position:"fixed",inset:0,pointerEvents:"none",backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,80,.012) 3px,rgba(0,255,80,.012) 4px)",zIndex:0}}/>
   <div style={{position:"fixed",inset:0,pointerEvents:"none",backgroundImage:"radial-gradient(ellipse at 50% 0%,rgba(0,255,80,.07) 0%,transparent 65%)",zIndex:0}}/>
 
+  {/* Toast container */}
   <div style={{position:"fixed",bottom:24,right:20,zIndex:999,display:"flex",flexDirection:"column",gap:8}}>
     {toasts.map(t=>(
       <div key={t.id} style={{background:"#0a140a",border:"1px solid "+t.color,color:t.color,padding:"10px 18px",borderRadius:8,...S,fontSize:13,boxShadow:"0 0 16px "+t.color+"55",animation:"toast 3.5s ease forwards"}}>{t.msg}</div>
@@ -174,12 +397,45 @@ function App(){
 
   <div style={{position:"relative",zIndex:1,maxWidth:840,margin:"0 auto",padding:"24px 16px 60px"}}>
 
-    <div style={{textAlign:"center",marginBottom:26}}>
+    {/* ══ HEADER ══ */}
+    <div style={{textAlign:"center",marginBottom:20}}>
       <div style={{fontSize:10,letterSpacing:8,color:"#4ade8055",marginBottom:6}}>■ FIVEM ■</div>
       <h1 style={{...OR,fontSize:26,fontWeight:900,color:"#4ade80",textShadow:"0 0 20px #4ade8088,0 0 50px #4ade8033",letterSpacing:3}}>🌿 FARM COMPANION</h1>
       <div style={{fontSize:10,letterSpacing:4,color:"#4ade8055",marginTop:5}}>GERENCIADOR DE PLANTAÇÃO — FIVEM</div>
     </div>
 
+    {/* ══ TAB BAR ══ */}
+    <div style={{display:"flex",gap:6,marginBottom:24,background:"rgba(0,0,0,.5)",padding:6,borderRadius:12,border:"1px solid #4ade8018"}}>
+      {tabs.map(tab=>{
+        const active=activeTab===tab.id;
+        const isSujo=tab.id==="sujo";
+        const activeColor=isSujo?"#c9a84c":"#4ade80";
+        const activeBg=isSujo?"linear-gradient(135deg,rgba(201,168,76,.18),rgba(201,168,76,.08))":"linear-gradient(135deg,#14532d,rgba(22,163,74,.3))";
+        const activeBorder=isSujo?"#c9a84c88":"#4ade8088";
+        return(
+          <button key={tab.id} onClick={()=>setActiveTab(tab.id)} style={{
+            flex:1,padding:"10px 0",borderRadius:8,cursor:"pointer",
+            background:active?activeBg:"transparent",
+            border:active?"1px solid "+activeBorder:"1px solid transparent",
+            color:active?activeColor:"#4ade8044",
+            ...OR,fontSize:12,fontWeight:900,letterSpacing:2,
+            transition:"all .2s",
+          }}>
+            {tab.icon} {tab.label}
+            {tab.id==="farm"&&plants.length>0&&(
+              <span style={{marginLeft:6,background:active?"#4ade8033":"#4ade8022",color:"#4ade80",
+                borderRadius:99,padding:"1px 7px",fontSize:10,...S}}>{plants.length}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+
+    {/* ══ CONTEÚDO DAS ABAS ══ */}
+    {activeTab==="sujo"&&<CalcSujo/>}
+
+    {activeTab==="farm"&&(<>
+    {/* Stats */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
       {[
         {label:"PLANTAS",   value:plants.length,                                  color:"#4ade80"},
@@ -194,6 +450,7 @@ function App(){
       ))}
     </div>
 
+    {/* Action buttons */}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,gap:8,flexWrap:"wrap"}}>
       <div style={{fontSize:11,color:"#4ade8044"}}>{plants.length===0?"Sem plantas ativas":plants.length+" planta(s) ativa(s)"}</div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -203,6 +460,7 @@ function App(){
       </div>
     </div>
 
+    {/* Cost bar */}
     <div style={{background:"rgba(0,0,0,.35)",border:"1px solid #4ade8018",borderRadius:10,padding:"12px 16px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",justifyContent:"space-between"}}>
       <div style={{fontSize:9,color:"#4ade8055",letterSpacing:2}}>💰 CUSTO POR PLANTA</div>
       <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
@@ -224,6 +482,7 @@ function App(){
       </div>
     </div>
 
+    {/* Empty state */}
     {plants.length===0&&(
       <div style={{border:"1px dashed #4ade8025",borderRadius:14,padding:"60px 24px",textAlign:"center",color:"#4ade8044"}}>
         <div style={{fontSize:48,marginBottom:14}}>🌱</div>
@@ -232,6 +491,7 @@ function App(){
       </div>
     )}
 
+    {/* Plant cards */}
     <div style={{display:"flex",flexDirection:"column",gap:18}}>
       {plants.map(plant=>{
         const pct=gPct(plant,now);
@@ -304,12 +564,10 @@ function App(){
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
                 <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"rgba(0,0,0,.3)",borderRadius:6,border:"1px solid #4ade8011",fontSize:11}}>
-                  <span style={{color:"#93c5fd"}}>💧 Água ×{sn.qtdAgua}</span>
-                  <span style={{color:"#d1fae5"}}>${plant.costs.agua.toLocaleString()}</span>
+                  <span style={{color:"#93c5fd"}}>💧 Água ×{sn.qtdAgua}</span><span style={{color:"#d1fae5"}}>${plant.costs.agua.toLocaleString()}</span>
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"rgba(0,0,0,.3)",borderRadius:6,border:"1px solid #4ade8011",fontSize:11}}>
-                  <span style={{color:"#86efac"}}>🌿 Fert ×{sn.qtdFert}</span>
-                  <span style={{color:"#d1fae5"}}>${plant.costs.fert.toLocaleString()}</span>
+                  <span style={{color:"#86efac"}}>🌿 Fert ×{sn.qtdFert}</span><span style={{color:"#d1fae5"}}>${plant.costs.fert.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -331,9 +589,11 @@ function App(){
         );
       })}
     </div>
+    </>)}
+
   </div>
 
-  {/* ═══ MODAL CUSTOS ═══ */}
+  {/* ══ MODAL CUSTOS ══ */}
   {showCfg&&(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
       <div style={{background:"#07090f",border:"1px solid #a78bfa55",borderRadius:16,padding:26,width:"100%",maxWidth:520,boxShadow:"0 0 60px #a78bfa15",animation:"fadeUp .3s ease",margin:"20px auto"}}>
@@ -342,7 +602,6 @@ function App(){
           <button onClick={()=>setShowCfg(false)} style={{background:"transparent",border:"none",color:"#a78bfa66",cursor:"pointer",fontSize:20}}>✕</button>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-
           <div style={{background:"rgba(167,139,250,.04)",border:"1px solid #a78bfa22",borderRadius:10,padding:"14px 16px"}}>
             <div style={{fontSize:9,letterSpacing:3,color:"#a78bfa66",marginBottom:12}}>💵 PREÇO UNITÁRIO DOS ITENS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -439,7 +698,7 @@ function App(){
     </div>
   )}
 
-  {/* ═══ MODAL LISTA ═══ */}
+  {/* ══ MODAL LISTA ══ */}
   {showGuide&&(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
       <div style={{background:"#070d04",border:"1px solid #fbbf2444",borderRadius:16,padding:26,width:"100%",maxWidth:500,boxShadow:"0 0 60px #fbbf2415",animation:"fadeUp .3s ease",margin:"20px auto"}}>
@@ -500,7 +759,7 @@ function App(){
     </div>
   )}
 
-  {/* ═══ MODAL NOVA PLANTA ═══ */}
+  {/* ══ MODAL NOVA PLANTA ══ */}
   {showAdd&&(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.88)",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:300,padding:16,overflowY:"auto"}}>
       <div style={{background:"#070f07",border:"1px solid #4ade8044",borderRadius:16,padding:26,width:"100%",maxWidth:440,boxShadow:"0 0 60px #4ade8022",animation:"fadeUp .3s ease",margin:"20px auto"}}>
